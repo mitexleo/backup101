@@ -3,7 +3,7 @@
 # Variables
 DOCKER_VOLUMES_DIR="/var/lib/docker/volumes"
 ROOT_HOME_DIR="/root"
-BACKUP_DIR="/root/backups"
+BACKUP_DIR="/mnt/backups"
 B2_BUCKET="backup101"
 MAX_BACKUPS=7  # Number of backups to keep
 BACKUP_COUNT_FILE="/root/backup_count.txt"
@@ -67,13 +67,13 @@ fi
 
 # Upload backups to Backblaze B2
 log_message "Uploading backups to Backblaze B2..."
-b2 upload-file --noProgress "$B2_BUCKET" "$BACKUP_DIR/$DOCKER_BACKUP_NAME" "$DOCKER_BACKUP_NAME"
+b2 file upload --no-progress "$B2_BUCKET" "$BACKUP_DIR/$DOCKER_BACKUP_NAME" "$DOCKER_BACKUP_NAME"
 if [ $? -ne 0 ]; then
     log_message "Failed to upload Docker volumes backup to Backblaze B2."
     exit 1
 fi
 
-b2 upload-file --noProgress "$B2_BUCKET" "$BACKUP_DIR/$ROOT_BACKUP_NAME" "$ROOT_BACKUP_NAME"
+b2 file upload --no-progress "$B2_BUCKET" "$BACKUP_DIR/$ROOT_BACKUP_NAME" "$ROOT_BACKUP_NAME"
 if [ $? -ne 0 ]; then
     log_message "Failed to upload root home backup to Backblaze B2."
     exit 1
