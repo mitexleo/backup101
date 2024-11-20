@@ -40,10 +40,11 @@ fi
 
 # Stop all running Docker containers
 log_message "Stopping all running Docker containers..."
-docker stop $(docker ps -q)
-if [ $? -ne 0 ]; then
-    log_message "Failed to stop Docker containers."
-    exit 1
+RUNNING_CONTAINERS=$(docker ps -q)
+if [ -n "$RUNNING_CONTAINERS" ]; then
+    docker stop $RUNNING_CONTAINERS
+else
+    log_message "No running containers to stop."
 fi
 
 # Create backups
