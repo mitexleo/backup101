@@ -9,10 +9,7 @@ MAX_BACKUPS=7  # Number of backups to keep
 BACKUP_COUNT_FILE="/root/backup_count.txt"
 RUNNING_CONTAINERS_FILE="/tmp/running_containers.txt"
 LOG_FILE="/var/log/docker_backup.log"
-TMP_DIR="/tmp"
-
-# Additional directories to backup can be added here
-ADDITIONAL_BACKUP_DIRS=()
+TMP_DIR="/root/tmp"
 
 # Ensure the backup directory exists
 mkdir -p "$BACKUP_DIR"
@@ -53,66 +50,44 @@ fi
 # Create backups
 log_message "Creating backup archives..."
 BACKUP_TIMESTAMP=$(date '+%Y%m%d%H%M%S')
-DOCKER_BACKUP_NAME="docker_volumes_$BACKUP_TIMESTAMP.tar"
-ROOT_BACKUP_NAME="root_home_$BACKUP_TIMESTAMP.tar"
+DOCKER_BACKUP_NAME="docker_volumes_$BACKUP_TIMESTAMP.tar.gz"
+ROOT_BACKUP_NAME="root_home_$BACKUP_TIMESTAMP.tar.gz"
 
-# Function to create a backup
-create_backup() {
-    local src_dir=$1
-    local backup_name=$2
-    tar -cf "$BACKUP_DIR/$backup_name" "$src_dir"
-    if [ $? -ne 0 ]; then
-        log_message "Failed to create backup for $src_dir."
-        exit 1
-    fi
-}
+tar -czf "$BACKUP_DIR/$DOCKER_BACKUP_NAME" "$DOCKER_VOLUMES_DIR"
+if [ $? -ne 0 ]; then
+    log_message "Failed to create Docker volumes backup."
+    exit 1
+fi
 
-# Create backups for specified directories
-create_backup "$DOCKER_VOLUMES_DIR" "$DOCKER_BACKUP_NAME"
-create_backup "$ROOT_HOME_DIR" "$ROOT_BACKUP_NAME"
-
-# Create backups for additional directories
-for dir in "${ADDITIONAL_BACKUP_DIRS[@]}"; do
-    BACKUP_NAME="${dir##*/}_$BACKUP_TIMESTAMP.tar"
-    create_backup "$dir" "$BACKUP_NAME"
-done
+tar -czf "$BACKUP_DIR/$ROOT_BACKUP_NAME" "$ROOT_HOME_DIR"
+if [ $? -ne 0 ]; then
+    log_message "Failed to create root home backup."
+    exit 1
+fi
 
 # Upload backups to Backblaze B2
 log_message "Uploading backups to Backblaze B2..."
-upload_backup() {
-    local backup_name=$1
-    b2 file upload --no-progress "$B2_BUCKET" "$BACKUP_DIR/$backup_name" "$backup_name"
-    if [ $? -ne 0 ]; then
-        log_message "Failed to upload backup $backup_name to Backblaze B2."
-        exit 1
-    fi
-}
+b2 file upload --no-progress "$B2_BUCKET" "$BACKUP_DIR/$DOCKER_BACKUP_NAME" "$DOCKER_BACKUP_NAME"
+if [ $? -ne 0 ]; then
+    log_message "Failed to upload Docker volumes backup to Backblaze B2."
+    exit 1
+fi
 
-upload_backup "$DOCKER_BACKUP_NAME"
-upload_backup "$ROOT_BACKUP_NAME"
-
-# Upload backups for additional directories
-for dir in "${ADDITIONAL_BACKUP_DIRS[@]}"; do
-    BACKUP_NAME="${dir##*/}_$BACKUP_TIMESTAMP.tar"
-    upload_backup "$BACKUP_NAME"
-done
+b2 file upload --no-progress "$B2_BUCKET" "$BACKUP_DIR/$ROOT_BACKUP_NAME" "$ROOT_BACKUP_NAME"
+if [ $? -ne 0 ]; then
+    log_message "Failed to upload root home backup to Backblaze B2."
+    exit 1
+fi
 
 # Update and manage backup retention
 log_message "Managing backup retention..."
 BACKUP_COUNT["docker_volumes"]=$(( ${BACKUP_COUNT["docker_volumes"]:-0} + 1 ))
 BACKUP_COUNT["root_home"]=$(( ${BACKUP_COUNT["root_home"]:-0} + 1 ))
 
-# Manage backup retention for additional directories
-for dir in "${ADDITIONAL_BACKUP_DIRS[@]}"; do
-    BACKUP_COUNT["${dir##*/}"]=$(( ${BACKUP_COUNT["${dir##*/}"]:-0} + 1 ))
-done
-
-# Function to delete old backups
-delete_old_backups() {
-    local key=$1
+for key in "docker_volumes" "root_home"; do
     if [ "${BACKUP_COUNT["$key"]}" -gt "$MAX_BACKUPS" ]; then
         OLDEST_BACKUP_NUMBER=$(( BACKUP_COUNT["$key"] - MAX_BACKUPS ))
-        OLDEST_BACKUP_NAME="${key}_$(date -d "-$OLDEST_BACKUP_NUMBER days" '+%Y%m%d%H%M%S').tar"
+        OLDEST_BACKUP_NAME="${key}_$(date -d "-$OLDEST_BACKUP_NUMBER days" '+%Y%m%d%H%M%S').tar.gz"
 
         log_message "Deleting old backup: $OLDEST_BACKUP_NAME"
         b2 delete-file-version "$B2_BUCKET" "$OLDEST_BACKUP_NAME"
@@ -122,25 +97,11 @@ delete_old_backups() {
             log_message "Failed to delete old backup: $OLDEST_BACKUP_NAME"
         fi
     fi
-}
-
-delete_old_backups "docker_volumes"
-delete_old_backups "root_home"
-
-# Delete old backups for additional directories
-for dir in "${ADDITIONAL_BACKUP_DIRS[@]}"; do
-    delete_old_backups "${dir##*/}"
 done
 
 # Remove local backup files
 log_message "Deleting local backup files..."
 rm -f "$BACKUP_DIR/$DOCKER_BACKUP_NAME" "$BACKUP_DIR/$ROOT_BACKUP_NAME"
-
-# Remove local backup files for additional directories
-for dir in "${ADDITIONAL_BACKUP_DIRS[@]}"; do
-    BACKUP_NAME="${dir##*/}_$BACKUP_TIMESTAMP.tar"
-    rm -f "$BACKUP_DIR/$BACKUP_NAME"
-done
 
 # Save updated backup counts to the backup_count.txt file
 log_message "Saving updated backup counts..."
@@ -165,4 +126,3 @@ done < "$RUNNING_CONTAINERS_FILE"
 rm -f "$RUNNING_CONTAINERS_FILE"
 
 log_message "Backup process completed successfully."
-
